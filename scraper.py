@@ -1,0 +1,2 @@
+def scraper(url):
+    pass
