@@ -1,61 +1,86 @@
-import requests  # static scrapping uses requests and beutiful soap to extyract form details
+import requests
 from bs4 import BeautifulSoup
-import pandas as pd
+import json
+import os  # For checking if the file exists
 
 websites = [
     "https://www.w3schools.com/html/html_forms.asp"
-    
 ]
-scraped_data = []
+output_file = "scraped_data_with_parameters.json"
 
-def scrape_static(url):
+# Function to load existing data from the JSON file
+def load_existing_data(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, "r") as f:
+            return json.load(f)
+    return []  # Return an empty list if the file does not exist
+
+# Function to save data back to the JSON file
+def save_data(file_path, data):
+    with open(file_path, "w") as f:
+        json.dump(data, f, indent=4)
+
+# Scraping function
+def scrape_static(url, existing_data):
     try:
-        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}) #User-Agent is set to mimic a browser and avoid getting blocked
+        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
         print(f"Scraping {url} - Status Code: {response.status_code}")
-        if response.status_code != 200:
-            print("Failed to retrieve the webpage.")
+        response.raise_for_status()
 
-        response.raise_for_status()  # Raise an error for bad status codes
         soup = BeautifulSoup(response.text, "html.parser")
 
         # Extract form details
-        forms = soup.find_all("form")
-        for form in forms:
+        forms = []
+        all_parameters = set()  # Use a set to avoid duplicate parameters
+        for form in soup.find_all("form"):
+            parameters = [input_tag.get("name") for input_tag in form.find_all("input") if input_tag.get("name")]
+            all_parameters.update(parameters)
             form_details = {
-                "URL": url,
-                "Form Action": form.get("action"),
-                "Method": form.get("method"),
-                "Input Fields": [input_tag.get("name") for input_tag in form.find_all("input")]
+                "action": form.get("action"),
+                "method": form.get("method"),
+                "parameters": parameters
             }
-            print(f"Scraped form: {form_details}")
-            scraped_data.append(form_details)
-        
-        # Scrape all links on the page
-        links = soup.find_all("a")
-        print(f"Found {len(links)} links on {url}")
+            forms.append(form_details)
 
-        for link in links:
+        # Extract link details
+        links = []
+        for link in soup.find_all("a"):
             link_details = {
-                "URL": url,
-                "Link Text": link.get_text(strip=True),  # Text inside the link
-                "Link URL": link.get("href")  # URL the link points to
+                "text": link.get_text(strip=True),
+                "href": link.get("href")
             }
-            print(f"Scraped link: {link_details}")
-            scraped_data.append(link_details)
+            links.append(link_details)
 
-            print(f"Found {len(forms)} forms on {url}")
+        # Update existing data
+        for page_data in existing_data:
+            if page_data["url"] == url:
+                # Merge forms
+                page_data["forms"].extend(forms)
+                # Merge parameters (avoid duplicates)
+                page_data["parameters"] = list(set(page_data["parameters"]).union(all_parameters))
+                # Merge links
+                page_data["links"].extend(links)
+                break
+        else:
+            # If the URL is not already in the existing data, add a new entry
+            existing_data.append({
+                "url": url,
+                "forms": forms,
+                "parameters": list(all_parameters),
+                "links": links
+                
+            })
 
     except Exception as e:
         print(f"Error scraping {url}: {e}")
 
-    
+# Load existing data
+existing_data = load_existing_data(output_file)
+
+# Scrape all websites and update the data
 for website in websites:
-    print(f"Scraping {website}...")
-    # First, try static scraping
-    scrape_static(website)
+    scrape_static(website, existing_data)
 
-
-output_file = "scraped_data.csv"
-df = pd.DataFrame(scraped_data)
-df.to_csv(output_file, index=False)
-print(f"Scraping completed. Data saved to {output_file}.")
+# Save the updated data back to the file
+save_data(output_file, existing_data)
+print(f"Scraping completed. Data updated in {output_file}.")
